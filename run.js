@@ -40,6 +40,12 @@ function getRandomAmount(min, max) {
   return ethers.parseUnits(amount.toFixed(6), 18); // Ensure precision to 6 decimal places
 }
 
+// Fungsi untuk delay dengan waktu acak antara min dan max (dalam milidetik)
+function randomDelay(min, max) {
+  const delayTime = Math.floor(Math.random() * (max - min + 1)) + min; // random antara min dan max
+  return new Promise(resolve => setTimeout(resolve, delayTime));
+}
+
 async function sendTeaToMultipleAddresses() {
   // Display header before getting input
   displayHeader();
@@ -51,7 +57,7 @@ async function sendTeaToMultipleAddresses() {
   }
 
   rl.question(chalk.yellow("Masukkan jumlah minimum dan maksimum (contoh: 0.01 0.00001) atau tekan Enter untuk default: "), async (input) => {
-    let min = 0.00001, max = 0.031;
+    let min = 0.00001, max = 0.0031;
     if (input.trim()) {
       const parts = input.split(" ").map(parseFloat);
       if (parts.length === 2 && parts.every(n => !isNaN(n))) {
@@ -67,7 +73,7 @@ async function sendTeaToMultipleAddresses() {
       console.log(chalk.cyan(`Mengirim ${ethers.formatUnits(amount, 18)} TEA ke ${recipient}`));
       await sendTransaction(recipient, amount, nonce);
       nonce++; // Increment nonce for the next transaction
-      await delay(3000); // Delay between transactions
+      await randomDelay(5000, 15000); // Delay acak antara 5 detik dan 15 detik
     }
 
     console.log(chalk.green("✅ Semua transaksi selesai!"));
