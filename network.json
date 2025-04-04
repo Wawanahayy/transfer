@@ -1,0 +1,5 @@
+{
+  "name": "Tea Sepolia Testnet",
+  "rpcUrl": "https://tea-sepolia.g.alchemy.com/public",
+  "explorer": "https://sepolia.tea.xyz/tx/"
+}
