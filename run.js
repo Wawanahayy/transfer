@@ -1,54 +1,64 @@
 import { ethers } from 'ethers';
-import readline from 'readline';
 import chalk from 'chalk';
-import { readFileSync } from 'fs';
+import fs from 'fs';
 import dotenv from 'dotenv';
-dotenv.config();
-import colors from 'colors';
+import readline from 'readline/promises';
+import { stdin as input, stdout as output } from 'process';
 
+// Fungsi tampilan awal
 function displayHeader() {
-  process.stdout.write('\x1Bc');
-  console.log(colors.bgGreen('========================================================='));
-  console.log(colors.bgGreen('========================================================='));
-  console.log(colors.bgWhite('====================== TRANSFER ========================='));
-  console.log(colors.bgWhite('================ CREATE By: JAWA-PRIDE  ================='));
-  console.log(colors.bgWhite('=========== https://t.me/AirdropJP_JawaPride ============')); 
-  console.log(colors.bgGreen('========================================================='));
-  console.log(colors.bgGreen('========================================================='));
-  console.log();
+  console.log("\x1b[40;96m============================================================\x1b[0m");
+  console.log("\x1b[42;37m=======================  J.W.P.A  ==========================\x1b[0m");
+  console.log("\x1b[45;97m================= @AirdropJP_JawaPride =====================\x1b[0m");
+  console.log("\x1b[43;30m=============== https://x.com/JAWAPRIDE_ID =================\x1b[0m");
+  console.log("\x1b[41;97m============= https://linktr.ee/Jawa_Pride_ID ==============\x1b[0m");
+  console.log("\x1b[44;30m============================================================\x1b[0m");
 }
 
-const NETWORK = {
-  name: "Tea Sepolia Testnet",
-  rpcUrl: "https://tea-sepolia.g.alchemy.com/public",
-  explorer: "https://sepolia.tea.xyz/tx/"
-};
+// Load ENV & Network
+dotenv.config();
+const network = JSON.parse(fs.readFileSync('network/network.json', 'utf-8'));
 
-const provider = new ethers.JsonRpcProvider(NETWORK.rpcUrl);
-const wallet = new ethers.Wallet(process.env.PRIVATE_KEY, provider);
-const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+// Setup Provider
+const provider = new ethers.providers.JsonRpcProvider(network.rpcUrl);
 
+// Load Private Keys
+const privateKeys = process.env.PRIVATE_KEYS.split(',');
+
+// Fungsi untuk membaca alamat tujuan dari file
 function getAddressesFromFile(filename) {
-  return readFileSync(filename, 'utf-8')
+  return fs.readFileSync(filename, 'utf-8')
     .split('\n')
     .map(addr => addr.trim())
     .filter(addr => addr.length > 0);
 }
 
+// Fungsi untuk mendapatkan jumlah acak dalam rentang tertentu
 function getRandomAmount(min, max) {
   const amount = Math.random() * (max - min) + min;
-  return ethers.parseUnits(amount.toFixed(6), 18); // Ensure precision to 6 decimal places
+  return ethers.utils.parseUnits(amount.toFixed(6), 18);
 }
 
-// Fungsi untuk delay dengan waktu acak antara min dan max (dalam milidetik)
+// Fungsi untuk delay acak
 function randomDelay(min, max) {
-  const delayTime = Math.floor(Math.random() * (max - min + 1)) + min; // random antara min dan max
+  const delayTime = Math.floor(Math.random() * (max - min + 1)) + min;
   return new Promise(resolve => setTimeout(resolve, delayTime));
 }
 
-async function sendTeaToMultipleAddresses() {
-  // Display header before getting input
+// Fungsi untuk mengacak array
+function shuffleArray(array) {
+  for (let i = array.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [array[i], array[j]] = [array[j], array[i]];
+  }
+}
+
+// Fungsi utama untuk mengirim transaksi
+async function sendToMultipleAddresses() {
   displayHeader();
+  await delay(5000);
+
+  const rl = readline.createInterface({ input, output });
 
   const addresses = getAddressesFromFile("address.txt");
   if (addresses.length === 0) {
@@ -56,59 +66,138 @@ async function sendTeaToMultipleAddresses() {
     return;
   }
 
-  rl.question(chalk.yellow("Masukkan jumlah minimum dan maksimum (contoh: 0.01 0.00001) atau tekan Enter untuk default: "), async (input) => {
-    let min = 0.00001, max = 0.0031;
-    if (input.trim()) {
-      const parts = input.split(" ").map(parseFloat);
-      if (parts.length === 2 && parts.every(n => !isNaN(n))) {
-        [max, min] = parts;
-      }
-    }
-
-    console.log(chalk.yellow(`Mengirim TEA ke ${addresses.length} alamat...`));
-    let nonce = await provider.getTransactionCount(wallet.address, 'pending');
-
-    for (let recipient of addresses) {
-      const amount = getRandomAmount(min, max);
-      console.log(chalk.cyan(`Mengirim ${ethers.formatUnits(amount, 18)} TEA ke ${recipient}`));
-      await sendTransaction(recipient, amount, nonce);
-      nonce++; // Increment nonce for the next transaction
-      await randomDelay(5000, 15000); // Delay acak antara 5 detik dan 15 detik
-    }
-
-    console.log(chalk.green("✅ Semua transaksi selesai!"));
+  const option = await rl.question(chalk.yellow("Pilih transaksi: (1) Native Token (2) ERC-20 Token: "));
+  if (option !== '1' && option !== '2') {
+    console.log(chalk.red("Pilihan tidak valid!"));
     rl.close();
-  });
+    return;
+  }
+
+  let tokenContractAddresses = [];
+  let min = 0.00001, max = 0.0031;
+
+  if (option === '2') {
+    const contractInput = await rl.question(chalk.green("Masukkan token contract address per akun (pisahkan dengan koma): "));
+    tokenContractAddresses = contractInput.split(',').map(s => s.trim());
+
+    if (tokenContractAddresses.length !== privateKeys.length) {
+      console.log(chalk.red("Jumlah token contract harus sama dengan jumlah akun!"));
+      rl.close();
+      return;
+    }
+  }
+
+  const inputAmount = await rl.question(chalk.yellow("Masukkan jumlah min & max (contoh: 0.01 0.002): "));
+  if (inputAmount.trim()) {
+    const parts = inputAmount.split(" ").map(parseFloat);
+    if (parts.length === 2 && parts.every(n => !isNaN(n))) {
+      [min, max] = parts;
+    } else if (parts.length === 1 && !isNaN(parts[0])) {
+      min = max = parts[0];
+    }
+  }
+
+  await processTransactions(addresses, option, tokenContractAddresses, min, max);
+  rl.close();
 }
 
-async function sendTransaction(to, amount, nonce) {
+// Fungsi untuk memproses transaksi secara acak
+async function processTransactions(addresses, option, tokenContractAddresses, min, max) {
+  console.log(chalk.yellow(`🔄 Mengacak pengiriman ke ${addresses.length} alamat dari ${privateKeys.length} akun...`));
+
+  const walletRecipientPairs = [];
+
+  for (let i = 0; i < privateKeys.length; i++) {
+    const privateKey = privateKeys[i];
+    const wallet = new ethers.Wallet(privateKey, provider);
+    for (let recipient of addresses) {
+      walletRecipientPairs.push({
+        wallet,
+        recipient,
+        contract: option === '2' ? tokenContractAddresses[i] : null,
+      });
+    }
+  }
+
+  shuffleArray(walletRecipientPairs);
+
+  for (const { wallet, recipient, contract } of walletRecipientPairs) {
+    const amount = getRandomAmount(min, max);
+    const nonce = await provider.getTransactionCount(wallet.address, 'pending');
+
+    console.log(chalk.cyan(`🔹 ${wallet.address} ➜ ${recipient} | ${ethers.utils.formatUnits(amount, 18)}`));
+
+    try {
+      if (option === '1') {
+        await sendNativeTransaction(wallet, recipient, amount, nonce);
+      } else {
+        await sendERC20Transaction(wallet, recipient, amount, nonce, contract);
+      }
+    } catch (error) {
+      console.error(chalk.red(`❌ Gagal kirim ke ${recipient} oleh ${wallet.address}:`), error.message);
+    }
+
+    await randomDelay(5000, 15000);
+  }
+
+  console.log(chalk.green("✅ Semua transaksi acak selesai!"));
+}
+
+// Fungsi untuk mengirim Native Token
+async function sendNativeTransaction(wallet, to, amount, nonce) {
   while (true) {
     try {
       const balance = await provider.getBalance(wallet.address);
-      if (balance < amount) {
-        console.log(chalk.red("Saldo tidak mencukupi, menunggu saldo mencukupi..."));
+      if (balance.lt(amount)) {
+        console.log(chalk.red(`❌ Saldo ${wallet.address} tidak cukup, menunggu...`));
         await delay(5000);
         continue;
       }
 
       const tx = await wallet.sendTransaction({ to, value: amount, nonce });
-      console.log(chalk.green(`✅ Berhasil! TX: ${NETWORK.explorer}${tx.hash}`));
+      console.log(chalk.green(`✅ Berhasil! TX: ${network.explorer}${tx.hash}`));
       break;
     } catch (error) {
-      if (error.message.includes("nonce too low")) {
-        console.log(chalk.red("⚠️ Nonce terlalu rendah, memperbarui nonce..."));
-        nonce = await provider.getTransactionCount(wallet.address, 'pending');
-      } else {
-        console.error(chalk.red("Gagal mengirim TEA:", error.message));
-        break;
-      }
+      console.error(chalk.red("⚠️ Error:"), error.message);
+      break;
     }
   }
 }
 
+// Fungsi untuk mengirim ERC-20 Token
+async function sendERC20Transaction(wallet, to, amount, nonce, tokenContractAddress) {
+  try {
+    const erc20Abi = [
+      "function transfer(address to, uint256 value) public returns (bool)",
+      "function balanceOf(address owner) view returns (uint256)"
+    ];
+    const contract = new ethers.Contract(tokenContractAddress, erc20Abi, wallet);
+    const balance = await contract.balanceOf(wallet.address);
+
+    if (balance.lt(amount)) {
+      console.log(chalk.red(`❌ Saldo token tidak cukup untuk ${wallet.address}, menunggu...`));
+      return;
+    }
+
+    const tx = await contract.transfer(to, amount, { nonce });
+    console.log(chalk.green(`✅ Berhasil mengirim token! TX: ${network.explorer}${tx.hash}`));
+  } catch (error) {
+    console.error(chalk.red("⚠️ Error:"), error.message);
+  }
+}
+
+// Fungsi delay
 function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-// Start the process
-sendTeaToMultipleAddresses();
+// Jalankan script
+sendToMultipleAddresses();
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error(chalk.red('💥 Unhandled Rejection:'), reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error(chalk.red('💥 Uncaught Exception:'), err);
+});
