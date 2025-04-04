@@ -6,12 +6,17 @@ import dotenv from 'dotenv';
 
 // Load ENV & Network
 dotenv.config();
-const network = JSON.parse(fs.readFileSync('network.json', 'utf-8'));
+const network = JSON.parse(fs.readFileSync('network/network.json', 'utf-8'));
 const tokenData = JSON.parse(fs.readFileSync('token/token.json', 'utf-8'));
 
 // Setup Provider
 const provider = new ethers.JsonRpcProvider(network.rpcUrl);
-const privateKeys = process.env.PRIVATE_KEYS.split(',');
+const privateKeys = process.env.PRIVATE_KEYS ? process.env.PRIVATE_KEYS.split(',') : [];
+
+if (privateKeys.length === 0) {
+    console.log(chalk.red("❌ Tidak ada private key di .env!"));
+    process.exit(1);
+}
 
 // Fungsi untuk membaca alamat tujuan dari file
 function getAddressesFromFile(filename) {
@@ -21,17 +26,21 @@ function getAddressesFromFile(filename) {
     .filter(addr => addr.length > 0);
 }
 
-// Fungsi untuk mendapatkan saldo token yang tersedia
+// Fungsi untuk mendapatkan saldo token ERC-20 yang tersedia
 async function getAvailableTokens(wallet) {
   const erc20Abi = ["function balanceOf(address owner) view returns (uint256)"];
   const availableTokens = [];
 
-  for (const [tokenName, contractAddress] of Object.entries(tokenData.ERC20)) {
-    const contract = new ethers.Contract(contractAddress, erc20Abi, wallet);
+  for (const [tokenName, { address, decimals }] of Object.entries(tokenData.ERC20)) {
+    const contract = new ethers.Contract(address, erc20Abi, wallet);
     const balance = await contract.balanceOf(wallet.address);
 
     if (balance > 0) {
-      availableTokens.push({ name: tokenName, contract: contractAddress, balance });
+      availableTokens.push({ 
+        name: tokenName, 
+        contract: address, 
+        balance: ethers.formatUnits(balance, decimals) 
+      });
     }
   }
 
@@ -42,7 +51,7 @@ async function getAvailableTokens(wallet) {
 async function sendToMultipleAddresses() {
   const addresses = getAddressesFromFile("address.txt");
   if (addresses.length === 0) {
-    console.log(chalk.red("File address.txt kosong!"));
+    console.log(chalk.red("❌ File address.txt kosong!"));
     return;
   }
 
@@ -50,7 +59,7 @@ async function sendToMultipleAddresses() {
 
   rl.question(chalk.yellow("Pilih transaksi: (1) Native Token (2) ERC-20 Token: "), async (option) => {
     if (option !== '1' && option !== '2') {
-      console.log(chalk.red("Pilihan tidak valid!"));
+      console.log(chalk.red("❌ Pilihan tidak valid!"));
       rl.close();
       return;
     }
@@ -69,7 +78,7 @@ async function sendToMultipleAddresses() {
 
       console.log(chalk.yellow("\nToken yang tersedia:"));
       availableTokens.forEach((token, index) => {
-        console.log(`${index + 1}. ${token.name} - ${ethers.formatUnits(token.balance, 18)} tokens`);
+        console.log(`${index + 1}. ${token.name} - ${token.balance} tokens`);
       });
 
       rl.question(chalk.green("\nPilih nomor token yang ingin dikirim: "), async (tokenIndex) => {
@@ -120,9 +129,12 @@ async function processTransactions(addresses, option, tokenContractAddress) {
 async function sendNativeTransaction(wallet, to, nonce) {
   try {
     const balance = await provider.getBalance(wallet.address);
-    const amount = balance.div(10); // Kirim 10% saldo sebagai contoh
+    const gasPrice = await provider.getFeeData();
 
-    if (balance < amount) {
+    const amount = balance.div(10); // Kirim 10% saldo sebagai contoh
+    const estimatedGas = ethers.parseUnits("21000", "wei");
+
+    if (balance < amount.add(estimatedGas)) {
       console.log(chalk.red(`❌ Saldo tidak cukup untuk ${wallet.address}, menunggu...`));
       return;
     }
@@ -139,10 +151,12 @@ async function sendERC20Transaction(wallet, to, nonce, tokenContractAddress) {
   try {
     const erc20Abi = [
       "function transfer(address to, uint256 value) public returns (bool)",
-      "function balanceOf(address owner) view returns (uint256)"
+      "function balanceOf(address owner) view returns (uint256)",
+      "function decimals() view returns (uint8)"
     ];
     const contract = new ethers.Contract(tokenContractAddress, erc20Abi, wallet);
     const balance = await contract.balanceOf(wallet.address);
+    const decimals = await contract.decimals();
     const amount = balance.div(10); // Kirim 10% saldo sebagai contoh
 
     if (balance < amount) {
